@@ -3,7 +3,8 @@ TimeInState
 
 ## Overview
 
-Through the "app settings" you can choose the artefact type that the chart id working on: Tasks, Defects, User Stories or Portfolio Items
+Through the "app settings" you can choose the artefact type that the chart is working on: Tasks, Defects, User Stories or Portfolio Items.
+
 If you choose portfolio, then the 'type' field in the app settings is used as well.
 
 In the main page of the app, you can select the field to do the plot against. This field is filtered to be one of the "drop-down' variety where there is a fixed list of 'states'
