@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TimeInState</title>
+
+    <script type="text/javascript" src="/apps/2.0/sdk-debug.js"></script>
+
+    <script type="text/javascript">
+        Rally.onReady(function () {
+                Ext.define('typesToChoose', {
+    extend: 'Ext.data.Model',
+    fields: [
+        {name: 'name',   type: 'string' },
+        {name: '_ref',   type: 'string' }
+    ],
+
+    // To help the rallycombobox, we need to provide some equivalents
+    getNonCollectionFields: function() {
+        return this.fields;
+    }
+});
+
+Ext.define('Rally.app.CustomApp', {
+    extend: 'Rally.app.App',
+    componentCls: 'app',
+    id: 'tipApp',
+    stateful: true,
+    settingsScope: 'project',
+
+    typeStore: null,
+
+    getSettingsFields: function() {
+
+        var returnVal = [{
+                xtype: 'rallycombobox',
+                name: 'artefactType',
+                fieldLabel: 'Artefact Type:',
+                stateful: true,
+                stateId: 'afcombo-' + Ext.id(),
+                storeType: 'Ext.data.Store',
+                store: this.store,
+                displayField: 'name',
+                labelAlign: 'right',
+                labelWidth: 150
+
+            },
+            {
+                xtype: 'rallyportfolioitemtypecombobox',
+                fieldLabel: 'PI Type (if selected):',
+                stateful: true,
+                stateId: 'picombo-' + Ext.id(),
+                name: 'piType',
+                labelAlign: 'right',
+                labelWidth: 150,
+                valueField: '_refObjectName'
+            }
+        ];
+
+        return returnVal;
+
+    },
+
+
+    items: [
+    {
+            xtype: 'container',
+            id: 'headerBox',
+            layout: 'column',
+            border: 5,
+            style: {
+                borderColor: Rally.util.Colors.cyan,
+                borderStyle: 'solid'
+            },
+            items: [
+                {
+                    xtype: 'rallydatefield',
+                    margin: 10,
+                    format: 'D d M Y',
+                    id: 'StartDate',
+                    stateful: true,
+                    fieldLabel: 'Start Date',
+                    value: Ext.Date.subtract( new Date(), Ext.Date.DAY, 90) // 90 days of previous iterations
+                },
+                {
+                    xtype: 'rallydatefield',
+                    margin: 10,
+                    fieldLabel: 'End Date',
+                    format: 'D d M Y',
+                    stateful: true,
+                    id: 'EndDate',
+                    value: new Date()
+                }
+            ]
+        }
+    ],
+
+    _getCalculatorConfig: function() {
+        return ({
+            'endDate': Ext.getCmp('EndDate').getValue(),
+            'startDate': Ext.getCmp('StartDate').getValue(),
+            'granularity': 'day'
+        });
+    },
+
+    _getSeriesData: function(app) {
+
+        //Find the field name for the relevant type in our little table because of the inconsistencies of WSAPI/LBAPI
+        var typeRecord = _.where(this.possibleTypes, {'_ref' : app.artefactType});
+        var typeName = typeRecord[0].lbapi;
+        if (typeName === 'PortfolioItem') {
+            typeName += '/' + app.piType;
+        }
+
+        var snapshots = Ext.create('Rally.data.lookback.SnapshotStore', {
+            autoLoad: false,
+            defaultFetch: ['ObjectID', '_ValidFrom', '_ValidTo' ],
+            compress: true,
+            fetch: [typeRecord[0].field],
+            hydrate: [typeRecord[0].field], //Hydrate only the field we are looking for (used in _gotSnapShots() )
+            filters: [
+                {
+                    property: '_TypeHierarchy',
+                    operator: 'in',
+                    value: [typeName]
+                },
+//                {
+//                    property: '__At',
+//                    value:  'current'
+//                }
+                {
+                    property: '_ValidFrom',
+                    operator: '>',
+                    value:  Ext.Date.format(Ext.getCmp('StartDate').value, "Y-m-d\\TH:i:s.u\\Z")
+                },
+                {
+                    property: '_ValidTo',
+                    operator: '<',
+                    value: Ext.Date.format(Ext.getCmp('EndDate').value, "Y-m-d\\TH:i:s.u\\Z")
+                }
+
+            ],
+            sorters: [
+                {
+                    property: 'ObjectID',
+                    direction: 'ASC'
+                },
+                {
+                    property: '_ValidFrom',
+                    direction: 'ASC'
+                }
+            ],
+            listeners: {
+                load: app._gotSnapShots,
+                scope: app
+            }
+        });
+
+        snapshots.load();
+    },
+
+    _findItem: function( data, fieldsToMatch) {
+        var keys = _.keys(fieldsToMatch);
+        var keylength = keys.length;
+
+        if ((data === null) || (keylength === 0))
+            return null;
+
+        for (var j = 0; j < data.length; j++) {
+            var record = data[j];
+
+            var obj = Object(record.data);   //WHo knows why this is in the example code....
+            var i = 0;
+            for ( i = 0; i< keylength; i++ ) {
+                var key = keys[i];
+                if (fieldsToMatch[key] !== obj[key] || !(key in obj)) { break; }
+            }
+
+            //If we get here after checking all the keys, then found the right stuff in this record
+            if ( i >= keylength) return record;
+        }
+
+        return null;
+    },
+
+    _gotSnapShots: function( store, data, success) {
+
+        var app = this;
+
+        //For all the snapshots we have, check the state change regardless of the 'Project' changing.
+        //The snapshots will be all those that states start and finish within the timebox specified.
+
+        //We need to merge the 'project' changes for each Object
+
+        // Then we have the issue of objects that move back and forth between states.
+        // So, let's total up how long each object was in a particular state regardless of when it was moved project
+
+        var lastDataItem = null;
+        var savedItems = [];
+        var hydratedField = store.hydrate[0];
+
+        _.each(data, function(item) {
+            var foundItem = null;
+            var findThese = {};
+
+            findThese['ObjectID'] = item.get('ObjectID');
+            findThese[hydratedField] = item.get(hydratedField);
+
+            d1 = new Date(item.get('_ValidFrom'));
+            d2 = new Date(item.get('_ValidTo'));
+
+            if ((foundItem = app._findItem(savedItems, findThese)
+                )) {
+                //It's in savedItems, so move its end date out by the amount in the new item
+                //The _ValidTo and _ValidFrom fields are strings, so we need to convert, manipulate and place back.
+                d_ = foundItem.get('TimeDiff');
+                d3 = (d_?d_:0);
+                foundItem.set('TimeDiff', d3 + (d2 - d1));
+            }
+            else {
+                //Don't know about it, so add to the saveitems array
+                item.set('TimeDiff', d2 - d1);
+                savedItems.push(item);
+            }
+        });
+
+        //Let's now scan the saveItems to generate some stats
+
+        //First collect all the time diffs (in ms)
+        _.each (savedItems, function(item) {
+
+            //Find the item state in the category list. Using indexOf is not really needed as we have already ensured it is OK.
+            if ((index = app.categoryData.indexOf(item.data[hydratedField])) >= 0) {
+                if ( ! app.artefactData[index] ) { app.artefactData[index] = []; }
+                app.artefactData[index].push(item.data.TimeDiff);
+            }
+
+        });
+
+        var dataArray = [];
+
+        _.each( app.artefactData, function(adArray) {
+            sortedArray = _.sortBy(adArray);
+            var stats = [];
+            var sum = 0;
+            var i = 0;
+            for (i = 0; i < adArray.length; i++) { sum += adArray[i]; }
+            stats.push(Math.floor(_.min(adArray)/864000)/100);
+            stats.push(Math.floor(sortedArray[Math.floor(i*0.25)]/864000)/100);
+            stats.push(Math.floor(sum/(864000*adArray.length))/100);
+            stats.push(Math.floor(sortedArray[Math.floor(i*0.75)]/864000)/100);
+            stats.push(Math.floor(_.max(adArray)/864000)/100);
+            dataArray.push(stats);
+        });
+
+        //So we have the same order of samples as the categoryData
+
+        app.seriesData =
+                [{
+                    data: dataArray
+                }];
+        app._drawChart();
+    },
+
+    _getCategories: function(app) {
+
+        //Find the field name for the relevant type in our little table because of the inconsistencies of WSAPI/LBAPI
+        var typeRecord = _.where(this.possibleTypes, {'_ref' : app.artefactType});
+        var typeName = typeRecord[0]._ref;
+
+        if (typeName) {
+            if (typeName === 'portfolioitem') {
+                typeName += '/' + app.piType.toLowerCase();
+            }
+        }
+
+        Rally.data.ModelFactory.getModel({
+                type:typeName,
+                scope: this
+            }).then({
+                success: function(model) { app._onModelRetrieved(model).then({
+                        success: function(allowedValues) {
+                            app.categoryData = allowedValues;
+                            app._getSeriesData(app);
+                        }
+                    });
+                }
+            });
+    },
+
+    _onModelRetrieved: function(model) {
+
+        //Check for overall type as we don't know the portfolioitem type names or number of them.
+        var typeName = model.typeName.split('/')[0];
+
+        //Find the field name for the relevant type in our little table: rallycombobox returns '_ref' field by default
+        var typeRecord = _.where(this.possibleTypes, {'_ref' : typeName});
+        var deferred = Ext.create('Deft.Deferred');
+
+        // If type is known to us, then find the allowed values for that field
+        if ( typeRecord ) {
+            fieldmodel = model.getField(typeRecord[0].field);
+            fieldmodel.getAllowedValueStore().load().then({
+                success: function(records, operation, success) {
+                    var allowedValues = _.map(records, function(record) {
+                        var value = record.get('StringValue');
+                        return value === '' ? 'None' : value;
+                    });
+
+                    deferred.resolve(allowedValues);
+                }
+            });
+        }
+
+        return deferred.promise;
+
+    },
+
+    //Hold  blank data for the graph until load
+
+    artefactType: null,
+
+    artefactData: {},
+
+    categoryData: [],
+
+    seriesData: [ {
+        data: []
+        }
+    ],
+
+    possibleTypes: [
+        { name: 'Stories',   _ref: 'hierarchicalrequirement',   lbapi: 'HierarchicalRequirement',  field: 'ScheduleState' },
+        { name: 'Defects',   _ref: 'defect',                    lbapi: 'Defect',                   field: 'ScheduleState'    },
+        { name: 'Tasks',     _ref: 'task',                      lbapi: 'Task',                     field: 'State'   },
+        { name: 'Portfolio', _ref: 'portfolioitem',             lbapi: 'PortfolioItem',            field: 'State' }
+    ],
+
+    _redrawChart: function() {
+        var chart = null;
+
+        if ( (chart = Ext.getCmp('tipChart')) ) {
+            chart.destroy();
+        }
+
+        this._getCategories(this);
+    },
+
+    _drawChart: function() {
+
+        var hc = Ext.create('Rally.ui.chart.Chart', {
+            id: 'tipChart',
+            loadMask: false,
+            chartData:{
+                categories: this.categoryData,
+                series: this.seriesData
+            },
+
+             chartConfig: {
+
+                chart: {
+                    type: 'boxplot',
+                    marginRight: 130,
+                    marginBottom: 25
+                },
+                title: {
+                    text: 'Time In State for Period',
+                    x: -20 //center
+                },
+                subtitle: {
+                    text: 'Min, 25%, Average, 75%, Max',
+                    x: -20
+                },
+                yAxis: {
+                    min: 0,
+                    title: {
+                        text: 'Days in State'
+                    }
+                },
+
+                  plotOptions: {
+                    columnrange: {
+                        dataLabels: {
+                            enabled: true,
+                            formatter: function () {
+                                return this.y + 'days';
+                            }
+                        }
+                    }
+                  },
+
+                  legend: {
+                    enabled: false
+        //             layout: 'vertical',
+        //             align: 'right',
+        //             verticalAlign: 'top',
+        //             x: -10,
+        //             y: 100,
+        //             borderWidth: 0
+                  }
+          }
+       });
+
+        this.add(hc);
+    },
+
+    launch: function() {
+        var app = this;
+
+        this.store = Ext.create('Ext.data.Store',{
+                model: 'typesToChoose',
+                data:   app.possibleTypes,
+                proxy: 'memory',
+                autoLoad: false
+
+        });
+
+        //This saves us a lot of getSetting() calls.
+        app.artefactType = app.getSetting('artefactType');
+        app.piType = app.getSetting('piType');
+
+
+        //Check we have the bits we need.
+        if (!app.artefactType || !this.piType ) {
+            var cc = Ext.create( 'Ext.container.Container', {
+                items: [{
+                    xtype: 'text',
+                    minWidth: 400,
+                    margin: 10,
+                    text: 'Please <save> your preference through the "Edit App Settings" menu option'
+                }]
+            });
+            Ext.getCmp('headerBox').add(cc);
+            app.artefactType = 'hierarchicalrequirement';
+
+        }
+
+        //Attach some callbacks to the date fields, so we can detect user change
+
+        Ext.getCmp('StartDate').on('change', app._redrawChart, this);
+        Ext.getCmp('EndDate').on('change', app._redrawChart, this);
+
+        //Let's kick off the process to build the chart.
+        app._getCategories(app);
+    }
+
+});
+
+
+            Rally.launchApp('Rally.app.CustomApp', {
+                name:"TimeInState",
+	            parentRepos:""
+            });
+
+        });
+    </script>
+
+
+
+    <style type="text/css">
+        .app {
+  /* Add app styles here */
+}
+
+    </style>
+</head>
+<body>
+</body>
+</html>
