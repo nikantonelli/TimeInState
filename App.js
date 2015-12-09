@@ -222,13 +222,21 @@ Ext.define('Rally.app.CustomApp', {
             //Find the item state in the category list. Using indexOf is not really needed as we have already ensured it is OK.
             if ((index = app.categoryData.indexOf(item.data[hydratedField])) >= 0) {
                 if ( ! app.artefactData[index] ) { app.artefactData[index] = []; }
-                app.artefactData[index].push(item.data.TimeDiff);
+
+                //We have an issue with people creating and moving in the same action.
+                //It skews the data to show that the minimum is 'zero'. To get around this, we
+                //onyl save data where the granularity is  more than one day.
+
+                if (item.data.TimeDiff > (24*60*60*10000)) {
+                    app.artefactData[index].push(item.data.TimeDiff);
+                }
             }
 
         });
 
         var dataArray = [];
 
+        //For each entry, calculate some 'real' stats ready for diisplay
         _.each( app.artefactData, function(adArray) {
             sortedArray = _.sortBy(adArray);
             var stats = [];
@@ -329,6 +337,10 @@ Ext.define('Rally.app.CustomApp', {
     _redrawChart: function() {
         var chart = null;
 
+        //Get the current field selected and move it into the possibleTypes array
+        var typeRecord = _.where(this.possibleTypes, {'_ref' : this.artefactType});
+        typeRecord[0].field = Ext.getCmp('fieldSelected').value;
+
         if ( (chart = Ext.getCmp('tipChart')) ) {
             chart.destroy();
         }
@@ -394,6 +406,11 @@ Ext.define('Rally.app.CustomApp', {
         this.add(hc);
     },
 
+    _checkAndRedrawChart: function() {
+        this._redrawChart();
+
+    },
+
     launch: function() {
         var app = this;
 
@@ -409,21 +426,65 @@ Ext.define('Rally.app.CustomApp', {
         app.artefactType = app.getSetting('artefactType');
         app.piType = app.getSetting('piType');
 
+        //Now that we know what type, give the user the option of choosing which
+        //field to work from.
+        var typeRecord = _.where(this.possibleTypes, {'_ref' : app.artefactType});
 
         //Check we have the bits we need.
         if (!app.artefactType || !this.piType ) {
+
+            app.artefactType = 'hierarchicalrequirement';
+            typeRecord = _.where(this.possibleTypes, {'_ref' : app.artefactType});
+
             var cc = Ext.create( 'Ext.container.Container', {
                 items: [{
                     xtype: 'text',
-                    minWidth: 400,
+                    minWidth: 500,
                     margin: 10,
-                    text: 'Please <save> your preference through the "Edit App Settings" menu option'
+                    text: 'Using ' + typeRecord[0].name + ' (Please <save> your preference through the "Edit App Settings" menu option)'
                 }]
             });
             Ext.getCmp('headerBox').add(cc);
-            app.artefactType = 'hierarchicalrequirement';
 
         }
+
+        //Add the field selector for the user
+        var typeName = typeRecord[0]._ref;
+
+        if (typeName) {
+            if (typeName === 'portfolioitem') {
+                typeName += '/' + app.piType.toLowerCase();
+            }
+        }
+
+        Ext.getCmp('headerBox').add(
+            {
+                xtype: 'rallyfieldcombobox',
+                model: typeName,
+                stateful: true,
+                stateId: 'fieldcombo-' + Ext.id(),
+                fieldLabel: typeRecord[0].name +  ' Field:',
+                id: 'fieldSelected',
+                margin: 10,
+                listeners: {
+                        select: function(combo) {
+                            this.fireEvent('fieldselected', combo.getRecord().get('fieldDefinition'));
+                        },
+                        ready: function(combo) {
+                            combo.store.filterBy(function(record) {
+                                var attr = record.get('fieldDefinition').attributeDefinition;
+                                return attr && !attr.ReadOnly && attr.Constrained && attr.AttributeType !== 'OBJECT' && attr.AttributeType !== 'COLLECTION';
+                            });
+                            if (combo.getRecord()) {
+                                this.fireEvent('fieldselected', combo.getRecord().get('fieldDefinition'));
+                            }
+                        }
+                    },
+                    bubbleEvents: ['fieldselected', 'fieldready']
+
+            }
+        );
+        this.on('fieldselected', app._redrawChart, this);
 
         //Attach some callbacks to the date fields, so we can detect user change
 
