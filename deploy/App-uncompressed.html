@@ -234,9 +234,9 @@ Ext.define('Rally.app.CustomApp', {
 
                 //We have an issue with people creating and moving in the same action.
                 //It skews the data to show that the minimum is 'zero'. To get around this, we
-                //onyl save data where the granularity is  more than one day.
+                //onyl save data where the granularity is  more than one hour.
 
-                if (item.data.TimeDiff > (24*60*60*10000)) {
+                if (item.data.TimeDiff > (60*60*10000)) {
                     app.artefactData[index].push(item.data.TimeDiff);
                 }
             }
