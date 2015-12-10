@@ -106,7 +106,7 @@ Ext.define('Rally.app.CustomApp', {
             autoLoad: false,
             defaultFetch: ['ObjectID', '_ValidFrom', '_ValidTo' ],
             compress: true,
-            fetch: [typeRecord[0].field],
+            fetch: ['FormattedID', 'Name', typeRecord[0].field],
             hydrate: [typeRecord[0].field], //Hydrate only the field we are looking for (used in _gotSnapShots() )
             filters: [
                 {
@@ -216,22 +216,26 @@ Ext.define('Rally.app.CustomApp', {
 
         //Let's now scan the saveItems to generate some stats
 
+        //Create a matching set of artefactData to categoryData
+        for (var i = 0; i < app.categoryData.length; i++ ){ app.artefactData[i] = []; }
+
         //First collect all the time diffs (in ms)
         _.each (savedItems, function(item) {
 
-            //Find the item state in the category list. Using indexOf is not really needed as we have already ensured it is OK.
+            //Deal with an empty field - Rally changes these to 'None' in the allowed Values
+            if (item.data[hydratedField] === '' ) { item.data[hydratedField] = 'None'; }
+
+            //Find the item state in the category list.
             if ((index = app.categoryData.indexOf(item.data[hydratedField])) >= 0) {
-                if ( ! app.artefactData[index] ) { app.artefactData[index] = []; }
 
                 //We have an issue with people creating and moving in the same action.
                 //It skews the data to show that the minimum is 'zero'. To get around this, we
-                //onyl save data where the granularity is  more than one hour.
+                //only save data where the granularity is  more than one hour.
 
-                if (item.data.TimeDiff > (60*60*10000)) {
+                if (item.data.TimeDiff > (60*60*1000)) {
                     app.artefactData[index].push(item.data.TimeDiff);
                 }
             }
-
         });
 
         var dataArray = [];
@@ -242,19 +246,24 @@ Ext.define('Rally.app.CustomApp', {
             var stats = [];
             var sum = 0;
             var i = 0;
-            for (i = 0; i < adArray.length; i++) { sum += adArray[i]; }
-            stats.push(Math.floor(_.min(adArray)/864000)/100);
-            stats.push(Math.floor(sortedArray[Math.floor(i*0.25)]/864000)/100);
-            stats.push(Math.floor(sum/(864000*adArray.length))/100);
-            stats.push(Math.floor(sortedArray[Math.floor(i*0.75)]/864000)/100);
-            stats.push(Math.floor(_.max(adArray)/864000)/100);
-            dataArray.push(stats);
+
+            // If we filter off the smaller timeboxes
+            if ( adArray.length > 0){
+                for (i = 0; i < adArray.length; i++) { sum += adArray[i]; }
+                stats.push(Math.floor(_.min(adArray)/864000)/100);
+                stats.push(Math.floor(sortedArray[Math.floor(i*0.25)]/864000)/100);
+                stats.push(Math.floor(sum/(864000*adArray.length))/100);
+                stats.push(Math.floor(sortedArray[Math.floor(i*0.75)]/864000)/100);
+                stats.push(Math.floor(_.max(adArray)/864000)/100);
+                dataArray.push(stats);
+            }
         });
 
         //So we have the same order of samples as the categoryData
 
         app.seriesData =
                 [{
+                    name: hydratedField,
                     data: dataArray
                 }];
         app._drawChart();
@@ -322,28 +331,26 @@ Ext.define('Rally.app.CustomApp', {
 
     categoryData: [],
 
-    seriesData: [ {
-        data: []
-        }
-    ],
+    seriesData: [],
 
     possibleTypes: [
         { name: 'Stories',   _ref: 'hierarchicalrequirement',   lbapi: 'HierarchicalRequirement',  field: 'ScheduleState' },
         { name: 'Defects',   _ref: 'defect',                    lbapi: 'Defect',                   field: 'ScheduleState'    },
         { name: 'Tasks',     _ref: 'task',                      lbapi: 'Task',                     field: 'State'   },
+        { name: 'TestCases', _ref: 'testcase',                  lbapi: 'TestCase',                 field: 'LastVerdict'   },
         { name: 'Portfolio', _ref: 'portfolioitem',             lbapi: 'PortfolioItem',            field: 'State' }
     ],
 
     _redrawChart: function() {
         var chart = null;
 
-        //Get the current field selected and move it into the possibleTypes array
-        var typeRecord = _.where(this.possibleTypes, {'_ref' : this.artefactType});
-        typeRecord[0].field = Ext.getCmp('fieldSelected').value;
-
         if ( (chart = Ext.getCmp('tipChart')) ) {
             chart.destroy();
         }
+
+        this.artefactData = {};
+        this.categoryData = [];
+        this.seriesData = [];
 
         this._getCategories(this);
     },
@@ -406,13 +413,22 @@ Ext.define('Rally.app.CustomApp', {
         this.add(hc);
     },
 
-    _checkAndRedrawChart: function() {
+    _checkAndRedrawChart: function(type) {
+
+        //Get the current field selected and move it into the possibleTypes array
+        var typeRecord = _.where(this.possibleTypes, {'_ref' : this.artefactType});
+        typeRecord[0].field = type.name;
         this._redrawChart();
 
     },
 
     launch: function() {
         var app = this;
+
+        // If you reset the code (e.g. reload the page) it can leave a chart behind...
+        if ( (chart = Ext.getCmp('tipChart')) ) {
+            chart.destroy();
+        }
 
         this.store = Ext.create('Ext.data.Store',{
                 model: 'typesToChoose',
@@ -451,20 +467,21 @@ Ext.define('Rally.app.CustomApp', {
         //Add the field selector for the user
         var typeName = typeRecord[0]._ref;
 
-        if (typeName) {
-            if (typeName === 'portfolioitem') {
-                typeName += '/' + app.piType.toLowerCase();
-            }
-        }
+//        if (typeName) {
+//            if (typeName === 'portfolioitem') {
+//                typeName += '/' + app.piType.toLowerCase();
+//            }
+//        }
 
         Ext.getCmp('headerBox').add(
             {
                 xtype: 'rallyfieldcombobox',
                 model: typeName,
+                autoScroll: true,
                 stateful: true,
                 stateId: 'fieldcombo-' + Ext.id(),
                 fieldLabel: typeRecord[0].name +  ' Field:',
-                id: 'fieldSelected',
+                id: 'fieldSelection',
                 margin: 10,
                 listeners: {
                         select: function(combo) {
@@ -473,7 +490,8 @@ Ext.define('Rally.app.CustomApp', {
                         ready: function(combo) {
                             combo.store.filterBy(function(record) {
                                 var attr = record.get('fieldDefinition').attributeDefinition;
-                                return attr && !attr.ReadOnly && attr.Constrained && attr.AttributeType !== 'OBJECT' && attr.AttributeType !== 'COLLECTION';
+                                return attr && attr.Constrained && attr.AttributeType !== 'COLLECTION';
+//                                return attr && attr.Constrained && attr.AttributeType !== 'OBJECT' && attr.AttributeType !== 'COLLECTION';
                             });
                             if (combo.getRecord()) {
                                 this.fireEvent('fieldselected', combo.getRecord().get('fieldDefinition'));
@@ -484,7 +502,7 @@ Ext.define('Rally.app.CustomApp', {
 
             }
         );
-        this.on('fieldselected', app._redrawChart, this);
+        this.on('fieldselected', app._checkAndRedrawChart, this);
 
         //Attach some callbacks to the date fields, so we can detect user change
 
