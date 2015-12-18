@@ -455,10 +455,14 @@ Ext.define('Rally.app.CustomApp', {
             multiSelect: true,
             margin: 10,
             listeners: {
-                collapse: function(combo) {
-                    this.fireEvent('fieldValuesSelected');
-                },
-
+//                collapse: function(combo) {
+//                    this.fireEvent('fieldValuesSelected');
+//                },
+//
+//                setvalue: function(combo, value, eventhandlers) {
+//                    if ( value.length > 0) { this.fireEvent('fieldValuesSelected'); }
+//                },
+//
                 //This is a bit like a restart, so we will re-initialise to all selected
                 fieldselected: function(type) {
                     this.setField(type);
@@ -466,20 +470,28 @@ Ext.define('Rally.app.CustomApp', {
                 },
 
                 //Make the assumption that when we first start off, we want all values shown
-                ready: function(combo) {
-                    var allItems = [];
-                    _.each(combo.store.data.items, function (record) {
-                        allItems.push(record.get('name'));
-                    });
-                    combo.setValue(allItems);
-                }
+//                ready: function(combo) {
+//                    var allItems = [];
+//                    _.each(combo.store.data.items, function (record) {
+//                        allItems.push(record.get('name'));
+//                    });
+//                    combo.setValue(allItems);
+//                }
             },
-            bubbleEvents: ['fieldValuesSelected']
+//            bubbleEvents: ['fieldValuesSelected']
         });
 
 Ext.util.Observable.capture( Ext.getCmp('fieldValues'), function(event) { console.log( 'value:', event);});
 
-        this.on('fieldValuesSelected', app._redrawChart, this);
+//        this.on('fieldValuesSelected', app._redrawChart, this);
+
+        Ext.getCmp('headerBox').add({
+            xtype: 'rallybutton',
+            text: 'DRAW',
+            margin: 10,
+            handler: this._redrawChart,
+            scope: this
+        });
     }
 
 });
