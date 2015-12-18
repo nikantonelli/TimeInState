@@ -114,10 +114,6 @@ Ext.define('Rally.app.CustomApp', {
                     operator: 'in',
                     value: [typeName]
                 },
-//                {
-//                    property: '__At',
-//                    value:  'current'
-//                }
                 {
                     property: '_ValidFrom',
                     operator: '>',
@@ -192,8 +188,7 @@ Ext.define('Rally.app.CustomApp', {
         _.each(data, function(item) {
             var foundItem = null;
             var findThese = {};
-
-            findThese['ObjectID'] = item.get('ObjectID');
+            findThese.ObjectID = item.get('ObjectID');
             findThese[hydratedField] = item.get(hydratedField);
 
             d1 = new Date(item.get('_ValidFrom'));
@@ -269,60 +264,6 @@ Ext.define('Rally.app.CustomApp', {
         app._drawChart();
     },
 
-    _getCategories: function(app) {
-
-        //Find the field name for the relevant type in our little table because of the inconsistencies of WSAPI/LBAPI
-        var typeRecord = _.where(this.possibleTypes, {'_ref' : app.artefactType});
-        var typeName = typeRecord[0]._ref;
-
-        if (typeName) {
-            if (typeName === 'portfolioitem') {
-                typeName += '/' + app.piType.toLowerCase();
-            }
-        }
-
-        Rally.data.ModelFactory.getModel({
-                type:typeName,
-                scope: this
-            }).then({
-                success: function(model) { app._onModelRetrieved(model).then({
-                        success: function(allowedValues) {
-                            app.categoryData = allowedValues;
-                            app._getSeriesData(app);
-                        }
-                    });
-                }
-            });
-    },
-
-    _onModelRetrieved: function(model) {
-
-        //Check for overall type as we don't know the portfolioitem type names or number of them.
-        var typeName = model.typeName.split('/')[0];
-
-        //Find the field name for the relevant type in our little table: rallycombobox returns '_ref' field by default
-        var typeRecord = _.where(this.possibleTypes, {'_ref' : typeName});
-        var deferred = Ext.create('Deft.Deferred');
-
-        // If type is known to us, then find the allowed values for that field
-        if ( typeRecord ) {
-            fieldmodel = model.getField(typeRecord[0].field);
-            fieldmodel.getAllowedValueStore().load().then({
-                success: function(records, operation, success) {
-                    var allowedValues = _.map(records, function(record) {
-                        var value = record.get('StringValue');
-                        return value === '' ? 'None' : value;
-                    });
-
-                    deferred.resolve(allowedValues);
-                }
-            });
-        }
-
-        return deferred.promise;
-
-    },
-
     //Hold  blank data for the graph until load
 
     artefactType: null,
@@ -349,10 +290,9 @@ Ext.define('Rally.app.CustomApp', {
         }
 
         this.artefactData = {};
-        this.categoryData = [];
         this.seriesData = [];
-
-        this._getCategories(this);
+        this.categoryData = Ext.getCmp('fieldValues').value;
+        this._getSeriesData(this);
     },
 
     _drawChart: function() {
@@ -400,12 +340,6 @@ Ext.define('Rally.app.CustomApp', {
 
                   legend: {
                     enabled: false
-        //             layout: 'vertical',
-        //             align: 'right',
-        //             verticalAlign: 'top',
-        //             x: -10,
-        //             y: 100,
-        //             borderWidth: 0
                   }
           }
        });
@@ -467,12 +401,6 @@ Ext.define('Rally.app.CustomApp', {
         //Add the field selector for the user
         var typeName = typeRecord[0]._ref;
 
-//        if (typeName) {
-//            if (typeName === 'portfolioitem') {
-//                typeName += '/' + app.piType.toLowerCase();
-//            }
-//        }
-
         Ext.getCmp('headerBox').add(
             {
                 xtype: 'rallyfieldcombobox',
@@ -485,7 +413,8 @@ Ext.define('Rally.app.CustomApp', {
                 margin: 10,
                 listeners: {
                         select: function(combo) {
-                            this.fireEvent('fieldselected', combo.getRecord().get('fieldDefinition'));
+                            typeRecord[0].field = combo.getRecord().get('fieldDefinition').name;
+                            Ext.getCmp('fieldValues').fireEvent('fieldselected', combo.getRecord().get('fieldDefinition'));
                         },
                         ready: function(combo) {
                             combo.store.filterBy(function(record) {
@@ -493,24 +422,55 @@ Ext.define('Rally.app.CustomApp', {
                                 return attr && attr.Constrained && attr.AttributeType !== 'COLLECTION';
 //                                return attr && attr.Constrained && attr.AttributeType !== 'OBJECT' && attr.AttributeType !== 'COLLECTION';
                             });
-                            if (combo.getRecord()) {
-                                this.fireEvent('fieldselected', combo.getRecord().get('fieldDefinition'));
-                            }
+                            combo.setValue(typeRecord[0].field);
                         }
-                    },
-                    bubbleEvents: ['fieldselected', 'fieldready']
+                    }
 
             }
         );
-        this.on('fieldselected', app._checkAndRedrawChart, this);
 
         //Attach some callbacks to the date fields, so we can detect user change
 
         Ext.getCmp('StartDate').on('change', app._redrawChart, this);
         Ext.getCmp('EndDate').on('change', app._redrawChart, this);
 
-        //Let's kick off the process to build the chart.
-        app._getCategories(app);
+        //Now set up the field selector for this type
+        Ext.getCmp('headerBox').add({
+            xtype: 'rallyfieldvaluecombobox',
+            id: 'fieldValues',
+            model: typeName,
+            stateful: true,
+            stateId: 'fieldvaluecombo-' + Ext.id(),
+            field: typeRecord[0].field,
+            fieldLabel: 'Field Values: ',
+            multiSelect: true,
+            margin: 10,
+            listeners: {
+                collapse: function(combo) {
+                    this.fireEvent('fieldValuesSelected');
+                },
+
+                //This is a bit like a restart, so we will re-initialise to all selected
+                fieldselected: function(type) {
+                    this.setField(type);
+                    this.store.reload();
+                },
+
+                //Make the assumption that when we first start off, we want all values shown
+                ready: function(combo) {
+                    var allItems = [];
+                    _.each(combo.store.data.items, function (record) {
+                        allItems.push(record.get('name'));
+                    });
+                    combo.setValue(allItems);
+                }
+            },
+            bubbleEvents: ['fieldValuesSelected']
+        });
+
+Ext.util.Observable.capture( Ext.getCmp('fieldValues'), function(event) { console.log( 'value:', event);});
+
+        this.on('fieldValuesSelected', app._redrawChart, this);
     }
 
 });
