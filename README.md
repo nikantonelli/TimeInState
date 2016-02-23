@@ -11,5 +11,5 @@ In the main page of the app, you can select the field to do the plot against. Th
 
 You can also select the dates to look for changes within. The filters are for changes that occur _between' the start date and the end date. The filters are not very accurate, so they try to work on a 'per day' basis. For example, if you create a story and it goes into the backlog state and you move it within the same day to another state (e.g. Defined), the app will ignore it.
 
-![alt text](https://github.com/nikantonelli/TimeInState/blob/master/docs/Untitled.png)
+![alt text](https://github.com/nikantonelli/TimeInState/blob/master/images/Untitled.png)
 
