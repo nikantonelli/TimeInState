@@ -10,8 +10,10 @@
                 Ext.define('typesToChoose', {
     extend: 'Ext.data.Model',
     fields: [
-        {name: 'name',   type: 'string' },
-        {name: '_ref',   type: 'string' }
+        {name: 'name',    type: 'string' },
+        {name: '_ref',    type: 'string' },
+        {name: 'lbapi',   type: 'string' },
+        {name: 'field',   type: 'string' }
     ],
 
     // To help the rallycombobox, we need to provide some equivalents
@@ -368,11 +370,14 @@ Ext.define('Rally.app.CustomApp', {
     launch: function() {
         var app = this;
 
-        // If you reset the code (e.g. reload the page) it can leave a chart behind...
-        if ( (chart = Ext.getCmp('tipChart')) ) {
-            chart.destroy();
-        }
+Ext.util.Observable.capture( app, function(event) { console.log( 'app:', event);});
 
+        //Attach some callbacks to the date fields, so we can detect user change
+
+        Ext.getCmp('StartDate').on('change', app._redrawChart, this);
+        Ext.getCmp('EndDate').on('change', app._redrawChart, this);
+
+        //Create a store to house our records
         this.store = Ext.create('Ext.data.Store',{
                 model: 'typesToChoose',
                 data:   app.possibleTypes,
@@ -409,19 +414,21 @@ Ext.define('Rally.app.CustomApp', {
 
         //Add the field selector for the user
         var typeName = typeRecord[0]._ref;
+        if (typeName === 'portfolioitem') {
+            typeName += '/' + app.piType.toLowerCase();
+        }
 
-        Ext.getCmp('headerBox').add(
-            {
-                xtype: 'rallyfieldcombobox',
+        var fieldSelector = Ext.create('Rally.ui.combobox.FieldComboBox', {
                 model: typeName,
                 autoScroll: true,
                 stateful: true,
-                stateId: 'fieldcombo-' + Ext.id(),
+                stateId: this.getContext().getScopedStateId('fieldcombo'),
                 fieldLabel: typeRecord[0].name +  ' Field:',
                 id: 'fieldSelection',
                 margin: 10,
                 listeners: {
                         select: function(combo) {
+                            app.saveState();
                             typeRecord[0].field = combo.getRecord().get('fieldDefinition').name;
                             Ext.getCmp('fieldValues').fireEvent('fieldselected', combo.getRecord().get('fieldDefinition'));
                         },
@@ -438,56 +445,52 @@ Ext.define('Rally.app.CustomApp', {
             }
         );
 
-        //Attach some callbacks to the date fields, so we can detect user change
-
-        Ext.getCmp('StartDate').on('change', app._redrawChart, this);
-        Ext.getCmp('EndDate').on('change', app._redrawChart, this);
+        Ext.getCmp('headerBox').add( fieldSelector);
 
         //Now set up the field selector for this type
-        Ext.getCmp('headerBox').add({
-            xtype: 'rallyfieldvaluecombobox',
+
+        var fieldValueSelector = Ext.create('Rally.ui.combobox.FieldValueComboBox', {
             id: 'fieldValues',
             model: typeName,
             stateful: true,
-            stateId: 'fieldvaluecombo-' + Ext.id(),
+            stateId: this.getContext().getScopedStateId('fieldvaluecombo'),
             field: typeRecord[0].field,
             fieldLabel: 'Field Values: ',
+            valueField: 'name',
             multiSelect: true,
             margin: 10,
             listeners: {
-//                collapse: function(combo) {
-//                    this.fireEvent('fieldValuesSelected');
-//                },
-//
-//                setvalue: function(combo, value, eventhandlers) {
-//                    if ( value.length > 0) { this.fireEvent('fieldValuesSelected'); }
-//                },
-//
+
                 //This is a bit like a restart, so we will re-initialise to all selected
                 fieldselected: function(type) {
                     this.setField(type);
-                    this.store.reload();
+                    app.saveState();
                 },
 
                 //Make the assumption that when we first start off, we want all values shown
-//                ready: function(combo) {
+                ready: function(combo) {
+                    combo.store.on('load', app._redrawChart, app);
 //                    var allItems = [];
 //                    _.each(combo.store.data.items, function (record) {
 //                        allItems.push(record.get('name'));
 //                    });
 //                    combo.setValue(allItems);
-//                }
+                    this.fireEvent('fieldValuesSelected');
+                }
             },
-//            bubbleEvents: ['fieldValuesSelected']
+            bubbleEvents: ['fieldValuesSelected']
         });
 
-Ext.util.Observable.capture( Ext.getCmp('fieldValues'), function(event) { console.log( 'value:', event);});
+        Ext.getCmp('headerBox').add( fieldValueSelector );
 
-//        this.on('fieldValuesSelected', app._redrawChart, this);
+Ext.util.Observable.capture( fieldSelector, function(event) { console.log( 'field:', event);});
+Ext.util.Observable.capture( fieldValueSelector, function(event) { console.log( 'value:', event);});
+
+        this.on('fieldValuesSelected', app._redrawChart, this);
 
         Ext.getCmp('headerBox').add({
             xtype: 'rallybutton',
-            text: 'DRAW',
+            text: 'Redraw',
             margin: 10,
             handler: this._redrawChart,
             scope: this
