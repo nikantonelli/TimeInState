@@ -141,6 +141,10 @@ Ext.define('Rally.app.CustomApp', {
             listeners: {
                 load: app._gotSnapShots,
                 scope: app
+            },
+
+            storeConfig: {
+                limit: infinity
             }
         });
 
