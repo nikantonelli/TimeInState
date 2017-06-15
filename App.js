@@ -144,7 +144,7 @@ Ext.define('Rally.app.CustomApp', {
             },
 
             storeConfig: {
-                limit: infinity
+                limit: Infinity
             }
         });
 
