@@ -32,9 +32,6 @@ Ext.define('Niks.Apps.TimeInState', {
         }
     },
 
-    lastFieldSelected: {},
-    lastUsedFieldValues: [],
-
     getSettingsFields: function() {
 
         var returnVal = [{
@@ -109,7 +106,6 @@ Ext.define('Niks.Apps.TimeInState', {
     },
 
     _getSeriesData: function(app) {
-        debugger;
         //Find the field name for the relevant type in our little table because of the inconsistencies of WSAPI/LBAPI
         var typeRecord = _.find(this.possibleTypes, {'_ref' : app.artefactType});
         var typeName = typeRecord.lbapi;
@@ -208,7 +204,6 @@ Ext.define('Niks.Apps.TimeInState', {
         // Then we have the issue of objects that move back and forth between states.
         // So, let's total up how long each object was in a particular state regardless of when it was moved project
 
-        var lastDataItem = null;
         var savedItems = [];
         var hydratedField = store.hydrate[0];
 
@@ -323,7 +318,6 @@ Ext.define('Niks.Apps.TimeInState', {
         gApp.artefactData = {};
         gApp.seriesData = [];
         gApp.categoryData = Ext.getCmp('fieldValueCombo').value;
-        console.log('Setting category data to: ',gApp.categoryData);
         gApp._getSeriesData(gApp);
     },
 
@@ -383,20 +377,12 @@ Ext.define('Niks.Apps.TimeInState', {
 
     _getFieldComboBoxConfig: function(typeRecord) {
         
-                //Add the field selector for the user
-                var typeName = typeRecord._ref;
-                if (typeName === 'portfolioitem') {
-                    typeName = this.piType.toLowerCase();
-                }
-        
-                //Let's see if we have been here before
-                if (!this.lastFieldSelected[typeName]) {
-                    this.lastFieldSelected[typeName] = '';  //Let the creation of the combobox go to the default field
-                }
-                else {
-                    //We have previously selected one, so 
-                }
-        
+        //Add the field selector for the user
+        var typeName = typeRecord._ref;
+        if (typeName === 'portfolioitem') {
+            typeName = this.piType.toLowerCase();
+        }
+                
         return {
             xtype: 'rallyfieldcombobox',
             model: typeName,
@@ -411,14 +397,12 @@ Ext.define('Niks.Apps.TimeInState', {
                     fldCombo.store.filterBy(function(record) {
                         var attr = record.get('fieldDefinition').attributeDefinition;
                             return attr && attr.Constrained && attr.AttributeType !== 'COLLECTION';
-        //                            return attr && attr.Constrained && attr.AttributeType !== 'OBJECT' && attr.AttributeType !== 'COLLECTION';
                     });
-                    //Send completion back to app
+                    //Send completion back to app after filter
                     gApp.fireEvent('storeFiltered');
                 },
                 //And also ping fieldValueCombo on user selection from here
                 select: function(fldCombo) {
-                    console.log('About to fire fieldSelected');
                     gApp.down('#fieldValueCombo').fireEvent('fieldselected', fldCombo.getRecord().get('fieldDefinition'));
                 }    
             },
@@ -450,7 +434,6 @@ Ext.define('Niks.Apps.TimeInState', {
                 fieldselected: function(type) {
                     this.setField(type);
                     this.setFieldLabel(cmbo.getRawValue() + ' Values: ');
-                    console.log('Setting fieldValueCombo to type: ', type);
                 },
                 setvalue: function(combo,values) {
                     gApp.fireEvent('fieldValuesSelected');
@@ -461,17 +444,15 @@ Ext.define('Niks.Apps.TimeInState', {
     },
 
     _createFieldValueCombo: function() {
-        //On model change, we need to reload the fieldvalues
         var fvCombo = this.down('#fieldValueCombo');
         if ( fvCombo) { fvCombo.destroy(); }
         var fieldValueConfig = this._getFieldValueComboBoxConfig();
         var fieldValueCombo = Ext.create('Rally.ui.combobox.FieldValueComboBox', fieldValueConfig);
-        Ext.util.Observable.capture( fieldValueCombo, function(event) { console.log( 'fvC:', event);});
         this.down('#headerBox').add(fieldValueCombo);
     },
 
     _createFieldCombo: function() {
-        //On model change, we need to reload the fieldvalues
+        //On model change, we need to reload the new fields
         var fldCombo = this.down('#fieldCombo');
         if ( fldCombo) { fldCombo.destroy(); }
 
@@ -479,7 +460,6 @@ Ext.define('Niks.Apps.TimeInState', {
         var typeRecord = _.find(this.possibleTypes, {'_ref' : this.artefactType});
         var fieldConfig = this._getFieldComboBoxConfig(typeRecord);
         var fieldCombo = Ext.create('Rally.ui.combobox.FieldComboBox', fieldConfig);
-        Ext.util.Observable.capture( fieldCombo, function(event) { console.log( 'fldC:', event);});
         this.down('#headerBox').add(fieldCombo);
     },
 
