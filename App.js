@@ -1,4 +1,8 @@
-Ext.define('typesToChoose', {
+(function () {
+    var Ext = window.Ext4 || window.Ext;
+    var gApp = null;
+
+    Ext.define('typesToChoose', {
     extend: 'Ext.data.Model',
     fields: [
         {name: 'name',    type: 'string' },
@@ -13,11 +17,14 @@ Ext.define('typesToChoose', {
     }
 });
 
-Ext.define('Rally.app.CustomApp', {
+Ext.define('Niks.Apps.TimeInState', {
     extend: 'Rally.app.App',
+    alias: 'widget.tisApp',
     componentCls: 'app',
     stateful: true,
     typeStore: null,
+    itemId: 'rallyApp',
+    id: 'rallyApp',
     config: {
         defaultSettings: {
             artefactType: 'hierarchicalrequirement',
@@ -25,14 +32,17 @@ Ext.define('Rally.app.CustomApp', {
         }
     },
 
+    lastFieldSelected: {},
+    lastUsedFieldValues: [],
+
     getSettingsFields: function() {
 
         var returnVal = [{
                 xtype: 'rallycombobox',
                 name: 'artefactType',
                 fieldLabel: 'Artefact Type:',
-                stateful: true,
-                stateId: this.getContext().getScopedStateId('artefactcombo'),
+                // stateful: true,
+                // stateId: this.getContext().getScopedStateId('artefactcombo'),
                 storeType: 'Ext.data.Store',
                 store: this.store,
                 displayField: 'name',
@@ -43,8 +53,8 @@ Ext.define('Rally.app.CustomApp', {
             {
                 xtype: 'rallyportfolioitemtypecombobox',
                 fieldLabel: 'PI Type (if selected):',
-                stateful: true,
-                stateId: this.getContext().getScopedStateId('picombo'),
+                // stateful: true,
+                // stateId: this.getContext().getScopedStateId('picombo'),
                 name: 'piType',
                 labelAlign: 'right',
                 labelWidth: 150,
@@ -85,7 +95,7 @@ Ext.define('Rally.app.CustomApp', {
                     stateful: true,
                     id: 'EndDate',
                     value: new Date()
-                }
+                },
             ]
         }
     ],
@@ -99,6 +109,7 @@ Ext.define('Rally.app.CustomApp', {
     },
 
     _getSeriesData: function(app) {
+        debugger;
         //Find the field name for the relevant type in our little table because of the inconsistencies of WSAPI/LBAPI
         var typeRecord = _.find(this.possibleTypes, {'_ref' : app.artefactType});
         var typeName = typeRecord.lbapi;
@@ -106,14 +117,15 @@ Ext.define('Rally.app.CustomApp', {
             typeName = app.piType;
         }
 
+        var fieldName = gApp.down('#fieldCombo').value;
         var snapshots = Ext.create('Rally.data.lookback.SnapshotStore', {
             autoLoad: false,
             defaultFetch: ['ObjectID', '_ValidFrom', '_ValidTo' ],
             compress: true,
             removeUnauthorizedSnapshots: true,
             pageSize: 15000,
-            fetch: ['FormattedID', 'Name', typeRecord.field, '_PreviousValues.'+typeRecord.field],
-            hydrate: [typeRecord.field, '_PreviousValues.'+typeRecord.field], //Hydrate  the field we are looking for first (used in _gotSnapShots() )
+            fetch: ['FormattedID', 'Name', fieldName, '_PreviousValues.' + fieldName],
+            hydrate: [fieldName, '_PreviousValues.' + fieldName], //Hydrate  the field we are looking for first (used in _gotSnapShots() )
             filters: [
                 {
                     property: '_TypeHierarchy',
@@ -121,7 +133,7 @@ Ext.define('Rally.app.CustomApp', {
                     value: [typeName]
                 },
                 {
-                    property: '_PreviousValues.'+typeRecord.field,
+                    property: '_PreviousValues.'+ fieldName,
                     operator: 'in',
                     value: app.categoryData
                 },
@@ -301,18 +313,18 @@ Ext.define('Rally.app.CustomApp', {
         { name: 'Portfolio', _ref: 'portfolioitem',             lbapi: 'PortfolioItem',            field: 'State' }
     ],
 
-    _redrawChart: function() {
+    _restart: function() {
         var chart = null;
 
         if ( (chart = Ext.getCmp('tipChart')) ) {
             chart.destroy();
         }
 
-        this.artefactData = {};
-        this.seriesData = [];
-        this.categoryData = Ext.getCmp('fieldValues').value;
-        console.log('Setting category data of: ', this, ' to ',this.categoryData);
-        this._getSeriesData(this);
+        gApp.artefactData = {};
+        gApp.seriesData = [];
+        gApp.categoryData = Ext.getCmp('fieldValueCombo').value;
+        console.log('Setting category data to: ',gApp.categoryData);
+        gApp._getSeriesData(gApp);
     },
 
     _drawChart: function() {
@@ -365,108 +377,159 @@ Ext.define('Rally.app.CustomApp', {
         this.add(hc);
     },
 
-//    onSettingsUpdate: function() {
-//        debugger;
-//        this._redrawChart();
-//    },
+    onSettingsUpdate: function() {
+        this._kickOff();
+    },
 
-
-    launch: function() {
-        var app = this;
-
-//Ext.util.Observable.capture( app, function(event) { console.log( 'app:', event);});
-
-        //Attach some callbacks to the date fields, so we can detect user change
-
-        Ext.getCmp('StartDate').on('change', app._redrawChart, app);
-        Ext.getCmp('EndDate').on('change', app._redrawChart, app);
-
-        //Create a store to house our records
-        this.store = Ext.create('Ext.data.Store',{
-                model: 'typesToChoose',
-                data:   app.possibleTypes,
-                proxy: 'memory',
-                autoLoad: false
-
-        });
-
-        //This saves us a lot of getSetting() calls.
-        app.artefactType = app.getSetting('artefactType') || 'hierarchicalrequirement';
-        app.piType = app.getSetting('piType') || 'Portfolioitem/Feature';
-
-        //Now that we know what type, give the user the option of choosing which
-        //field to work from.
-        var typeRecord = _.find(this.possibleTypes, {'_ref' : app.artefactType});
-        //Add the field selector for the user
-        var typeName = typeRecord._ref;
-        if (typeName === 'portfolioitem') {
-            typeName = app.piType.toLowerCase();
-        }
-
-        var fieldSelector = Ext.create('Rally.ui.combobox.FieldComboBox', {
-                model: typeName,
-                autoScroll: true,
-                stateful: true,
-                stateId: this.getContext().getScopedStateId('fieldcombo'),
-                fieldLabel: typeRecord.name +  ' Field:',
-                id: 'fieldSelection',
-                margin: 10,
-                listeners: {
-                        select: function(combo) {
-                            app.saveState();
-                            typeRecord.field = combo.getRecord().get('fieldDefinition').name;
-                            Ext.getCmp('fieldValues').fireEvent('fieldselected', combo.getRecord().get('fieldDefinition'));
-                        },
-                        ready: function(combo) {
-                            combo.store.filterBy(function(record) {
-                                var attr = record.get('fieldDefinition').attributeDefinition;
-                                return attr && attr.Constrained && attr.AttributeType !== 'COLLECTION';
-//                                return attr && attr.Constrained && attr.AttributeType !== 'OBJECT' && attr.AttributeType !== 'COLLECTION';
-                            });
-                            combo.setValue(typeRecord.field);
-                        }
-                    }
-
-            }
-        );
-
-        Ext.getCmp('headerBox').add( fieldSelector);
-        app.on('fieldValuesSelected', app._redrawChart, app);
-
-        //Now set up the field selector for this type
-
-        var fieldValueSelector = Ext.create('Rally.ui.combobox.FieldValueComboBox', {
-            id: 'fieldValues',
+    _getFieldComboBoxConfig: function(typeRecord) {
+        
+                //Add the field selector for the user
+                var typeName = typeRecord._ref;
+                if (typeName === 'portfolioitem') {
+                    typeName = this.piType.toLowerCase();
+                }
+        
+                //Let's see if we have been here before
+                if (!this.lastFieldSelected[typeName]) {
+                    this.lastFieldSelected[typeName] = '';  //Let the creation of the combobox go to the default field
+                }
+                else {
+                    //We have previously selected one, so 
+                }
+        
+        return {
+            xtype: 'rallyfieldcombobox',
             model: typeName,
+            autoScroll: true,
             stateful: true,
-            stateId: this.getContext().getScopedStateId('fieldvaluecombo'),
-            field: typeRecord.field,
-            fieldLabel: 'Field Values: ',
+            stateId: Ext.id() + 'fieldCombo',
+            fieldLabel: typeRecord.name + ' Field:',
+            id: 'fieldCombo',
+            margin: 10,
+            listeners: {
+                ready: function(fldCombo) {
+                    fldCombo.store.filterBy(function(record) {
+                        var attr = record.get('fieldDefinition').attributeDefinition;
+                            return attr && attr.Constrained && attr.AttributeType !== 'COLLECTION';
+        //                            return attr && attr.Constrained && attr.AttributeType !== 'OBJECT' && attr.AttributeType !== 'COLLECTION';
+                    });
+                    //Send completion back to app
+                    gApp.fireEvent('storeFiltered');
+                },
+                //And also ping fieldValueCombo on user selection from here
+                select: function(fldCombo) {
+                    console.log('About to fire fieldSelected');
+                    gApp.down('#fieldValueCombo').fireEvent('fieldselected', fldCombo.getRecord().get('fieldDefinition'));
+                }    
+            },
+            allowNoEntry: false,
+            allowBlank: false
+        };
+    },
+
+    _getFieldValueComboBoxConfig: function() {
+        //Get the cuurent state of the field selector
+        var cmbo = gApp.down('#fieldCombo');
+        var field = cmbo.getValue();
+        var model = cmbo.getModel();
+        return {
+            xtype: 'rallyfieldvaluecombobox',
+            id: 'fieldValueCombo',
+            model: model.typePath,
+            stateful: true,
+            stateId: Ext.id() + 'fieldValueCombo',
+            field: cmbo.getValue(),
+            fieldLabel: cmbo.getRawValue() + ' Values: ',
+            labelWidth: 150,
             valueField: 'name',
             multiSelect: true,
             margin: 10,
+            allowNoEntry: false,
+            allowBlank: false,
             listeners: {
-
-                //This is a bit like a restart, so we will re-initialise to all selected
                 fieldselected: function(type) {
                     this.setField(type);
-                    app.saveState();
+                    this.setFieldLabel(cmbo.getRawValue() + ' Values: ');
+                    console.log('Setting fieldValueCombo to type: ', type);
                 },
+                setvalue: function(combo,values) {
+                    gApp.fireEvent('fieldValuesSelected');
+                }
+            }
+        };
+
+    },
+
+    _createFieldValueCombo: function() {
+        //On model change, we need to reload the fieldvalues
+        var fvCombo = this.down('#fieldValueCombo');
+        if ( fvCombo) { fvCombo.destroy(); }
+        var fieldValueConfig = this._getFieldValueComboBoxConfig();
+        var fieldValueCombo = Ext.create('Rally.ui.combobox.FieldValueComboBox', fieldValueConfig);
+        Ext.util.Observable.capture( fieldValueCombo, function(event) { console.log( 'fvC:', event);});
+        this.down('#headerBox').add(fieldValueCombo);
+    },
+
+    _createFieldCombo: function() {
+        //On model change, we need to reload the fieldvalues
+        var fldCombo = this.down('#fieldCombo');
+        if ( fldCombo) { fldCombo.destroy(); }
+
+        //Now that we know what type...
+        var typeRecord = _.find(this.possibleTypes, {'_ref' : this.artefactType});
+        var fieldConfig = this._getFieldComboBoxConfig(typeRecord);
+        var fieldCombo = Ext.create('Rally.ui.combobox.FieldComboBox', fieldConfig);
+        Ext.util.Observable.capture( fieldCombo, function(event) { console.log( 'fldC:', event);});
+        this.down('#headerBox').add(fieldCombo);
+    },
+
+    launch: function() {
+
+        gApp = this;    //Store away for later
+
+        //Create a store to house our records
+        this.store = Ext.create('Ext.data.Store',{
+            model: 'typesToChoose',
+            data:   gApp.possibleTypes,
+            proxy: 'memory',
+            autoLoad: false
+
+        });
+
+        this.addListener( {
+            storeFiltered: function() {
+                this._createFieldValueCombo();
             }
         });
 
-        Ext.getCmp('headerBox').add( fieldValueSelector );
-
-// Ext.util.Observable.capture( fieldSelector, function(event) { console.log( 'field:', event);});
-// Ext.util.Observable.capture( fieldValueSelector, function(event) { console.log( 'value:', event);});
-
-        Ext.getCmp('headerBox').add({
-            xtype: 'rallybutton',
-            text: 'Draw',
-            margin: 10,
-            handler: app._redrawChart,
-            scope: app
+        this.addListener( {
+            fieldValuesSelected: function() {
+                //We need to 'debounce' the calls to here as there are quite a few when the app starts up
+                // and also when the user selects items
+                this._resetTimer(this._restart);
+                
+            }
         });
-    }
 
+        this._kickOff();
+    },
+
+    _kickOff: function() {
+        //We need to get the original settings
+        this.artefactType = this.getSetting('artefactType') || 'hierarchicalrequirement';
+        this.piType = this.getSetting('piType') || 'Portfolioitem/Feature';
+
+                
+        Ext.getCmp('StartDate').on('change', gApp._restart, gApp);
+        Ext.getCmp('EndDate').on('change', gApp._restart, gApp);
+
+        //Kick it all off....
+        this._createFieldCombo();
+    },
+
+    _resetTimer: function(callFunc) {
+        if ( this.timer) { clearTimeout(this.timer);}
+        this.timer = setTimeout(callFunc, 2000);    //Debounce calls to the tune of half a second
+    },
 });
+}());

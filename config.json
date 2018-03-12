@@ -1,6 +1,6 @@
 {
     "name": "TimeInState",
-    "className": "Rally.app.CustomApp",
+    "className": "Niks.Apps.TimeInState",
     "server": "https://rally1.rallydev.com",
     "sdk": "2.0",
     "javascript": [
