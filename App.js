@@ -120,8 +120,8 @@ Ext.define('Niks.Apps.TimeInState', {
             compress: true,
             removeUnauthorizedSnapshots: true,
             pageSize: 15000,
-            fetch: ['FormattedID', 'Name', fieldName, '_PreviousValues.' + fieldName],
-            hydrate: [fieldName, '_PreviousValues.' + fieldName], //Hydrate  the field we are looking for first (used in _gotSnapShots() )
+            fetch: [fieldName],
+            hydrate: [fieldName], //Hydrate  the field we are looking for first (used in _gotSnapShots() )
             filters: [
                 {
                     property: '_TypeHierarchy',
@@ -129,7 +129,7 @@ Ext.define('Niks.Apps.TimeInState', {
                     value: [typeName]
                 },
                 {
-                    property: '_PreviousValues.'+ fieldName,
+                    property: fieldName,
                     operator: 'in',
                     value: app.categoryData
                 },
