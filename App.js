@@ -119,7 +119,7 @@ Ext.define('Niks.Apps.TimeInState', {
             defaultFetch: ['ObjectID', '_ValidFrom', '_ValidTo' ],
             compress: true,
             removeUnauthorizedSnapshots: true,
-            pageSize: 15000,
+            pageSize: 2000,
             fetch: [fieldName],
             hydrate: [fieldName], //Hydrate  the field we are looking for first (used in _gotSnapShots() )
             filters: [
