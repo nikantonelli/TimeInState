@@ -121,7 +121,16 @@ Ext.define('Niks.Apps.TimeInState', {
         if (typeName === 'PortfolioItem') {
             typeName = app.piType;
         }
-
+        var projFilters = {
+            property: 'Project',
+            value: this.getContext().getProject().ObjectID
+        };
+        if (this.getContext().getDataContext().projectScopeDown) {
+            projFilters = {
+                    property: "_ProjectHierarchy",
+                    value: this.getContext().getProject().ObjectID
+                };
+        }
         var fieldName = gApp.down('#fieldCombo').value;
         var snapshots = Ext.create('Rally.data.lookback.SnapshotStore', {
             autoLoad: false,
@@ -132,6 +141,7 @@ Ext.define('Niks.Apps.TimeInState', {
             fetch: [fieldName],
             hydrate: [fieldName], //Hydrate  the field we are looking for first (used in _gotSnapShots() )
             filters: [
+                projFilters,
                 {
                     property: '_TypeHierarchy',
                     operator: 'in',
@@ -203,7 +213,7 @@ Ext.define('Niks.Apps.TimeInState', {
     _gotSnapShots: function( store, data, success) {
 
         var app = this;
-        console.log('Snapshots received: ', data.length);
+        console.log('Snapshots received: ', (data && data.length)?data.length:'none');
 
         //For all the snapshots we have, check the state change regardless of the 'Project' changing.
         //The snapshots will be all those that states start and finish within the timebox specified.
